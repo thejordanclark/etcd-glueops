@@ -1,14 +1,18 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    cliqr (2.2.0)
+      sawaal (~> 1.0.0)
     etcd (0.3.0)
       mixlib-log
     mixlib-log (1.6.0)
+    sawaal (1.0.2)
 
 PLATFORMS
   ruby
 
 DEPENDENCIES
+  cliqr
   etcd
 
 BUNDLED WITH
