@@ -2,8 +2,12 @@
 require 'rubygems'
 require 'bundler/setup'
 
+glueops_config = '/glueOps'
 etcd_host = '127.0.0.1'
 etcd_port = '4001'
+path_regex = %r{(/)[a-zA-Z0-1]*}
+run_app = nil
+
 
 require 'cliqr'
 cli = Cliqr.interface do
@@ -13,7 +17,25 @@ cli = Cliqr.interface do
   version '0.0.1'
 
   # main command handler
-  handler {}
+  handler do
+    run_app = true
+  end
+
+  option :config do
+    short 'c'
+    description "glueOps Config path with etcd. default: #{glueops_config}"
+    operator do
+      begin
+        fail StandardError,
+             "Invalid Path: #{value}" unless path_regex.match(value)
+        glueops_config = value
+      rescue => msg
+        print "Config Path Invalid\n"
+        puts(msg)
+        exit
+      end
+    end
+  end
 
   option :host do
     short 'H'
@@ -47,13 +69,53 @@ cli = Cliqr.interface do
       end
     end
   end
-  # the end of options
-end
+end # end of options
 
+# Get all the imputs
 cli.execute(ARGV)
 
-print "etcd creds = #{etcd_host}:#{etcd_port}\n"
+if run_app
+  # print "etcd creds = #{etcd_host}:#{etcd_port}\n"
+  # print "glueOps config = #{glueops_config}\n"
 
+  # Contect "client" to etcd
+  require 'etcd'
+  client = Etcd.client(host: etcd_host.to_s, port: etcd_port.to_s)
+
+  # Check Config Path
+  if client.exists?(glueops_config)
+    if client.get(glueops_config).directory?
+      print "Config Path #{glueops_config} is a directory\n"
+    else
+      print "Config Path #{glueops_config} exists but is not a directory\n"
+      exit
+    end
+  else
+    print "Config Path #{glueops_config} dose not exist\n"
+    exit
+  end
+
+  # services
+
+  # tcp-services
+  if client.exists?("#{glueops_config}/tcp-services")
+    print "#{glueops_config}/tcp-services exists\n"
+    if client.get("#{glueops_config}/tcp-services").directory?
+      print "#{glueops_config}/tcp-services is a directory\n"
+      tcp_services = client.get("#{glueops_config}/tcp-services").children
+      tcp_services.each do |tcp_service|
+        puts tcp_service.key
+      end
+
+    end
+  end
+end # End of run_app
+
+# tcp_services = client.get("#{glueops_config}/tcp-services")
+# if tcp_services.directory?
+#   print "#{glueops_config}/tcp-services is a directory\n"
+
+#
 # require 'etcd'
 #
 # client = Etcd.client(host: '127.0.0.1', port: 4001)
