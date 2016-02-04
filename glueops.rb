@@ -3,6 +3,8 @@ require 'rubygems'
 require 'bundler/setup'
 
 glueops_config = '/glueOps'
+registrator_path = '/registrator'
+haproxy_discover_path = '/haproxy-discover'
 etcd_host = '127.0.0.1'
 etcd_port = '4001'
 path_regex = %r{(/)[a-zA-Z0-1]*}
@@ -73,49 +75,105 @@ end # end of options
 # Get all the imputs
 cli.execute(ARGV)
 
+def check_etcd_path(client, etcd_path, path_name)
+  if client.exists?(etcd_path)
+    unless client.get(etcd_path).directory?
+      print "#{path_name} Path #{etcd_path} exists but is not a directory\n"
+      exit
+    end
+  else
+    print "#{path_name} Path #{etcd_path} does not exist\n"
+    exit
+  end
+end # check_etcd_path
+
+def check_haproxy_skel(client, haproxy_service_path, haproxy_service_ext)
+  unless client.exists?(haproxy_service_path)
+    client.create(haproxy_service_path, dir: true)
+  end
+  unless client.exists?("#{haproxy_service_path}/upstreams")
+    client.create("#{haproxy_service_path}/upstreams", dir: true)
+  end
+  if client.exists?("#{haproxy_service_path}/ports")
+    unless client.get("#{haproxy_service_path}/ports").value == haproxy_service_ext
+      client.create("#{haproxy_service_path}/ports", value: haproxy_service_ext)
+    end
+  else
+    client.create("#{haproxy_service_path}/ports", value: haproxy_service_ext)
+  end
+end
+
 if run_app
   # print "etcd creds = #{etcd_host}:#{etcd_port}\n"
   # print "glueOps config = #{glueops_config}\n"
 
-  # Contect "client" to etcd
+  # Connect "client" to etcd
   require 'etcd'
   client = Etcd.client(host: etcd_host.to_s, port: etcd_port.to_s)
 
   # Check Config Path
-  if client.exists?(glueops_config)
-    if client.get(glueops_config).directory?
-      print "Config Path #{glueops_config} is a directory\n"
-    else
-      print "Config Path #{glueops_config} exists but is not a directory\n"
-      exit
-    end
+  check_etcd_path(client, glueops_config, 'Config')
+
+  # Read registrator_path
+  if client.exists?("#{glueops_config}/config/registrator_path")
+    registrator_path = client.get("#{glueops_config}/config/registrator_path").value
   else
-    print "Config Path #{glueops_config} dose not exist\n"
-    exit
+    print "Registrator path not set in #{glueops_config}/config/registrator_path "
+    print "using defaul value #{registrator_path}\n"
   end
+
+  # Read haproxy_discover_path
+  if client.exists?("#{glueops_config}/config/haproxy-discover_path")
+    haproxy_discover_path = client.get("#{glueops_config}/config/haproxy-discover_path").value
+  else
+    print "HAProxy-Discover path not set in #{glueops_config}/config/haproxy-discover_path "
+    print "using defaul value #{haproxy_discover_path}\n"
+  end
+
+  print "Registrator Path: #{registrator_path}\nHAProxy-Discover Path: #{haproxy_discover_path}\n"
+
+  # Check registrator_path
+  check_etcd_path(client, registrator_path, 'Registrator')
+
+  # Check haproxy_discover_path
+  check_etcd_path(client, haproxy_discover_path, 'HAProxy-Discover')
 
   # services
 
   # tcp-services
   if client.exists?("#{glueops_config}/tcp-services")
-    print "#{glueops_config}/tcp-services exists\n"
     if client.get("#{glueops_config}/tcp-services").directory?
-      print "#{glueops_config}/tcp-services is a directory\n"
       tcp_services = client.get("#{glueops_config}/tcp-services").children
       tcp_services.each do |tcp_service|
         service_name = tcp_service.key.split('/').last
-        puts service_name
 
         # Read in configs
+        tcp_service = client.get(tcp_service.key).children
+        tcp_service.each do |tcp_service_port|
+          service_port = tcp_service_port.key.split('/').last
+          service_ext_ip = client.get("#{tcp_service_port.key}/ext_ip").value
+          service_ext_port = client.get("#{tcp_service_port.key}/ext_port").value
 
-        # Create Skel
+          # Create Skel
+          haproxy_service_path = "#{haproxy_discover_path}/tcp-services/#{service_name}-#{service_port}"
+          haproxy_service_ext = "#{service_ext_ip}:#{service_ext_port}"
+          check_haproxy_skel(client, haproxy_service_path, haproxy_service_ext)
 
-        # Add upstreams
+          # Find Registered services
 
-        # verify upstreams
+          # Add upstreams
 
-        # Run additional scripts
-      end # end tcp_services.each
+          # verify upstreams
+
+          # Run additional scripts per port
+
+          # print "------------------------\n"
+          # print "Service Name: #{service_name}\nService Port: #{service_port}\n"
+          # print "Service Ext IP: #{service_ext_ip}\nService Ext Port: #{service_ext_port}\n"
+        end # end tcp_service.each do |tcp_service_port|
+
+        # Run additional scripts per service
+      end # end tcp_services.each do |tcp_service|
     end # end tcp-services.directory?
   end # end tcp-services
 end # End of run_app
