@@ -8,7 +8,6 @@ etcd_port = '4001'
 path_regex = %r{(/)[a-zA-Z0-1]*}
 run_app = nil
 
-
 require 'cliqr'
 cli = Cliqr.interface do
   name 'glueOps'
@@ -104,11 +103,21 @@ if run_app
       print "#{glueops_config}/tcp-services is a directory\n"
       tcp_services = client.get("#{glueops_config}/tcp-services").children
       tcp_services.each do |tcp_service|
-        puts tcp_service.key
-      end
+        service_name = tcp_service.key.split('/').last
+        puts service_name
 
-    end
-  end
+        # Read in configs
+
+        # Create Skel
+
+        # Add upstreams
+
+        # verify upstreams
+
+        # Run additional scripts
+      end # end tcp_services.each
+    end # end tcp-services.directory?
+  end # end tcp-services
 end # End of run_app
 
 # tcp_services = client.get("#{glueops_config}/tcp-services")
