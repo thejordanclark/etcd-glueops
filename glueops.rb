@@ -96,17 +96,24 @@ def check_haproxy_skel(client, haproxy_service_path, haproxy_service_ext)
   end
   if client.exists?("#{haproxy_service_path}/ports")
     unless client.get("#{haproxy_service_path}/ports").value == haproxy_service_ext
-      client.create("#{haproxy_service_path}/ports", value: haproxy_service_ext)
+      client.update("#{haproxy_service_path}/ports", value: haproxy_service_ext)
     end
   else
     client.create("#{haproxy_service_path}/ports", value: haproxy_service_ext)
   end
-end
+end # check_haproxy_skel
+
+def add_haproxy_upstream(client, haproxy_service_path, container_id, service_backend_url)
+  if client.exists?("#{haproxy_service_path}/upstreams/#{container_id}")
+    unless client.get("#{haproxy_service_path}/upstreams/#{container_id}").value == service_backend_url
+      client.update("#{haproxy_service_path}/upstreams/#{container_id}", value: service_backend_url)
+    end
+  else
+    client.create("#{haproxy_service_path}/upstreams/#{container_id}", value: service_backend_url)
+  end
+end # add_haproxy_upstream
 
 if run_app
-  # print "etcd creds = #{etcd_host}:#{etcd_port}\n"
-  # print "glueOps config = #{glueops_config}\n"
-
   # Connect "client" to etcd
   require 'etcd'
   client = Etcd.client(host: etcd_host.to_s, port: etcd_port.to_s)
@@ -160,8 +167,20 @@ if run_app
           check_haproxy_skel(client, haproxy_service_path, haproxy_service_ext)
 
           # Find Registered services
-
-          # Add upstreams
+          registered_services = client.get(registrator_path).children
+          registered_services.each do |registered_service|
+            backend_services = client.get(registered_service.key).children
+            backend_services.each do |backend_service|
+              # backend_service_path = registered_service.key
+              backend_service_string = backend_service.key.split('/').last
+              (container_id, container_name, container_port) = backend_service_string.split(':')
+              if container_name == service_name && container_port == service_port
+                # Add upstreams
+                puts backend_service.key
+                add_haproxy_upstream(client, haproxy_service_path, container_id, client.get(backend_service.key).value)
+              end
+            end
+          end # registered_services.each do |registerd_service|
 
           # verify upstreams
 
