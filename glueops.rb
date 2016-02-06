@@ -113,6 +113,22 @@ def add_haproxy_upstream(client, haproxy_service_path, container_id, service_bac
   end
 end # add_haproxy_upstream
 
+def verify_existing_upstreams(client, haproxy_discover_path, service_type)
+  if client.exists?("#{haproxy_discover_path}/#{service_type}")
+    if client.get("#{haproxy_discover_path}/#{service_type}").directory?
+      services = client.get("#{haproxy_discover_path}/#{service_type}").children
+      services.each do |service|
+        next if client.exists?("#{haproxy_discover_path}/#{service_type}/upstreams")
+        service_string = service.key.split('/').last
+        service_port = service_string.split('-').last
+        service_name = service_string.chomp("-#{service_port}")
+        puts service_name
+        puts service_port
+      end # services.each do |service|
+    end # client.get(#{haproxy_discover_path}/#{service_type}).directory?
+  end # client.exists?(#{haproxy_discover_path}/#{service_type})
+end # verify_existing_upstreams
+
 if run_app
   # Connect "client" to etcd
   require 'etcd'
@@ -176,13 +192,10 @@ if run_app
               (container_id, container_name, container_port) = backend_service_string.split(':')
               if container_name == service_name && container_port == service_port
                 # Add upstreams
-                puts backend_service.key
                 add_haproxy_upstream(client, haproxy_service_path, container_id, client.get(backend_service.key).value)
               end
             end
           end # registered_services.each do |registerd_service|
-
-          # verify upstreams
 
           # Run additional scripts per port
 
@@ -194,6 +207,10 @@ if run_app
         # Run additional scripts per service
       end # end tcp_services.each do |tcp_service|
     end # end tcp-services.directory?
+
+    # verify upstreams
+    verify_existing_upstreams(client, haproxy_discover_path, 'tcp-services')
+
   end # end tcp-services
 end # End of run_app
 
