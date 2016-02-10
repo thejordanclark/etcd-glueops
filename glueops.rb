@@ -1,4 +1,8 @@
 #!/usr/bin/env ruby
+
+# Make sure PWD where the script lives
+Dir.chdir(File.dirname(__FILE__)) unless Dir.pwd == File.dirname(__FILE__)
+
 require 'rubygems'
 require 'bundler/setup'
 
