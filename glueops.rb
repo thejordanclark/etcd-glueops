@@ -98,21 +98,21 @@ def verify_existing_upstreams(client, service_path, registrator_path, service_st
   end # upstreams.each do |upstream|
 end # verify_existing_upstreams
 
-def find_existing_services(client, haproxy_discover_path, registrator_path, service_type)
+def find_existing_services(client, glueops_config, haproxy_discover_path, registrator_path, service_type)
   if client.exists?("#{haproxy_discover_path}/#{service_type}")
     if client.get("#{haproxy_discover_path}/#{service_type}").directory?
       services = client.get("#{haproxy_discover_path}/#{service_type}").children
       services.each do |service|
         next if client.exists?("#{haproxy_discover_path}/#{service_type}/upstreams")
         service_string = service.key.split('/').last
-        # DEBUG info
-        # puts service_name
-        # puts service_port
-        # puts service_string
+        service_port = service_string.split('-').last
+        service_name = service_string.chomp("-#{service_port}")
 
-        # verify each service upstreams, remove old
-        verify_existing_upstreams(client, "#{haproxy_discover_path}/#{service_type}", registrator_path, service_string)
-
+        # Only verify managed services
+        if client.exists?("#{glueops_config}/#{service_type}/#{service_name}")
+          # Verify each service upstreams, remove old
+          verify_existing_upstreams(client, "#{haproxy_discover_path}/#{service_type}", registrator_path, service_string)
+        end # client.exists?("#{glueops_config}/#{service_type}/#{service_name}")
       end # services.each do |service|
     end # client.get(#{haproxy_discover_path}/#{service_type}).directory?
   end # client.exists?(#{haproxy_discover_path}/#{service_type})
@@ -262,7 +262,7 @@ if run_app
     end # end tcp-services.directory?
 
     # verify upstreams, remove invalid upstreams
-    find_existing_services(client, haproxy_discover_path, registrator_path, 'tcp-services')
+    find_existing_services(client, glueops_config, haproxy_discover_path, registrator_path, 'tcp-services')
 
   end # end tcp-services
 end # End of run_app
