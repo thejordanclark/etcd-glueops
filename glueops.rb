@@ -14,6 +14,110 @@ etcd_port = '4001'
 path_regex = %r{(/)[a-zA-Z0-1]*}
 run_app = nil
 
+def check_etcd_path(client, etcd_path, path_name)
+  if client.exists?(etcd_path)
+    unless client.get(etcd_path).directory?
+      print "#{path_name} Path #{etcd_path} exists but is not a directory\n"
+      exit
+    end
+  else
+    print "#{path_name} Path #{etcd_path} does not exist\n"
+    exit
+  end
+end # check_etcd_path
+
+def check_haproxy_skel(client, haproxy_service_path, haproxy_service_ext)
+  unless client.exists?(haproxy_service_path)
+    client.create(haproxy_service_path, dir: true)
+  end
+  unless client.exists?("#{haproxy_service_path}/upstreams")
+    client.create("#{haproxy_service_path}/upstreams", dir: true)
+  end
+  if client.exists?("#{haproxy_service_path}/ports")
+    unless client.get("#{haproxy_service_path}/ports").value == haproxy_service_ext
+      client.update("#{haproxy_service_path}/ports", value: haproxy_service_ext)
+    end
+  else
+    client.create("#{haproxy_service_path}/ports", value: haproxy_service_ext)
+  end
+end # check_haproxy_skel
+
+def add_haproxy_upstream(client, haproxy_service_path, container_id, service_backend_url)
+  if client.exists?("#{haproxy_service_path}/upstreams/#{container_id}")
+    unless client.get("#{haproxy_service_path}/upstreams/#{container_id}").value == service_backend_url
+      client.update("#{haproxy_service_path}/upstreams/#{container_id}", value: service_backend_url)
+    end
+  else
+    client.create("#{haproxy_service_path}/upstreams/#{container_id}", value: service_backend_url)
+  end
+end # add_haproxy_upstream
+
+def verify_existing_upstreams(client, service_path, registrator_path, service_string)
+  service_port = service_string.split('-').last
+  service_name = service_string.chomp("-#{service_port}")
+
+  # read each upstream
+  upstreams = client.get("#{service_path}/#{service_string}/upstreams").children
+  upstreams.each do |upstream|
+    upstream_container = upstream.key.split('/').last
+    # DEBUG info:
+    # puts "-- upstream to verify --"
+    # puts service_path
+    # puts registrator_path
+    # puts service_string
+    # puts service_port
+    # puts service_name
+    # puts upstream_container
+    # puts ""
+    # See if it exists
+    upstream_found = nil
+
+    # Find Registered services
+    registered_services = client.get(registrator_path).children
+    registered_services.each do |registered_service|
+      backend_services = client.get(registered_service.key).children
+      backend_services.each do |backend_service|
+        backend_service_string = backend_service.key.split('/').last
+        (container_id, container_name, container_port) = backend_service_string.split(':')
+        if container_id == upstream_container && container_name == service_name && container_port == service_port
+          # Mark as found
+          upstream_found = true
+        end
+      end
+    end # registered_services.each do |registerd_service|
+
+    # remove if not exist
+    if not upstream_found
+      # DEBUG info:
+      # puts "---REMOVEING---"
+      # puts "#{service_path}/#{service_string}/upstreams/#{upstream_container}"
+
+      client.delete("#{service_path}/#{service_string}/upstreams/#{upstream_container}")
+
+    end # if upstream_found
+  end # upstreams.each do |upstream|
+end # verify_existing_upstreams
+
+def find_existing_services(client, haproxy_discover_path, registrator_path, service_type)
+  if client.exists?("#{haproxy_discover_path}/#{service_type}")
+    if client.get("#{haproxy_discover_path}/#{service_type}").directory?
+      services = client.get("#{haproxy_discover_path}/#{service_type}").children
+      services.each do |service|
+        next if client.exists?("#{haproxy_discover_path}/#{service_type}/upstreams")
+        service_string = service.key.split('/').last
+        # DEBUG info
+        # puts service_name
+        # puts service_port
+        # puts service_string
+
+        # verify each service upstreams, remove old
+        verify_existing_upstreams(client, "#{haproxy_discover_path}/#{service_type}", registrator_path, service_string)
+
+      end # services.each do |service|
+    end # client.get(#{haproxy_discover_path}/#{service_type}).directory?
+  end # client.exists?(#{haproxy_discover_path}/#{service_type})
+end # find_existing_services
+
 require 'cliqr'
 cli = Cliqr.interface do
   name 'glueOps'
@@ -79,60 +183,7 @@ end # end of options
 # Get all the imputs
 cli.execute(ARGV)
 
-def check_etcd_path(client, etcd_path, path_name)
-  if client.exists?(etcd_path)
-    unless client.get(etcd_path).directory?
-      print "#{path_name} Path #{etcd_path} exists but is not a directory\n"
-      exit
-    end
-  else
-    print "#{path_name} Path #{etcd_path} does not exist\n"
-    exit
-  end
-end # check_etcd_path
-
-def check_haproxy_skel(client, haproxy_service_path, haproxy_service_ext)
-  unless client.exists?(haproxy_service_path)
-    client.create(haproxy_service_path, dir: true)
-  end
-  unless client.exists?("#{haproxy_service_path}/upstreams")
-    client.create("#{haproxy_service_path}/upstreams", dir: true)
-  end
-  if client.exists?("#{haproxy_service_path}/ports")
-    unless client.get("#{haproxy_service_path}/ports").value == haproxy_service_ext
-      client.update("#{haproxy_service_path}/ports", value: haproxy_service_ext)
-    end
-  else
-    client.create("#{haproxy_service_path}/ports", value: haproxy_service_ext)
-  end
-end # check_haproxy_skel
-
-def add_haproxy_upstream(client, haproxy_service_path, container_id, service_backend_url)
-  if client.exists?("#{haproxy_service_path}/upstreams/#{container_id}")
-    unless client.get("#{haproxy_service_path}/upstreams/#{container_id}").value == service_backend_url
-      client.update("#{haproxy_service_path}/upstreams/#{container_id}", value: service_backend_url)
-    end
-  else
-    client.create("#{haproxy_service_path}/upstreams/#{container_id}", value: service_backend_url)
-  end
-end # add_haproxy_upstream
-
-def verify_existing_upstreams(client, haproxy_discover_path, service_type)
-  if client.exists?("#{haproxy_discover_path}/#{service_type}")
-    if client.get("#{haproxy_discover_path}/#{service_type}").directory?
-      services = client.get("#{haproxy_discover_path}/#{service_type}").children
-      services.each do |service|
-        next if client.exists?("#{haproxy_discover_path}/#{service_type}/upstreams")
-        service_string = service.key.split('/').last
-        service_port = service_string.split('-').last
-        service_name = service_string.chomp("-#{service_port}")
-        puts service_name
-        puts service_port
-      end # services.each do |service|
-    end # client.get(#{haproxy_discover_path}/#{service_type}).directory?
-  end # client.exists?(#{haproxy_discover_path}/#{service_type})
-end # verify_existing_upstreams
-
+# Run the App
 if run_app
   # Connect "client" to etcd
   require 'etcd'
@@ -157,7 +208,8 @@ if run_app
     print "using defaul value #{haproxy_discover_path}\n"
   end
 
-  print "Registrator Path: #{registrator_path}\nHAProxy-Discover Path: #{haproxy_discover_path}\n"
+  # DEBUG info:
+  # print "Registrator Path: #{registrator_path}\nHAProxy-Discover Path: #{haproxy_discover_path}\n"
 
   # Check registrator_path
   check_etcd_path(client, registrator_path, 'Registrator')
@@ -201,19 +253,16 @@ if run_app
             end
           end # registered_services.each do |registerd_service|
 
-          # Run additional scripts per port
-
-          # print "------------------------\n"
-          # print "Service Name: #{service_name}\nService Port: #{service_port}\n"
-          # print "Service Ext IP: #{service_ext_ip}\nService Ext Port: #{service_ext_port}\n"
+          # TODO: Run additional scripts per port
         end # end tcp_service.each do |tcp_service_port|
 
-        # Run additional scripts per service
+        # TODO: Run additional scripts per service
+
       end # end tcp_services.each do |tcp_service|
     end # end tcp-services.directory?
 
-    # verify upstreams
-    verify_existing_upstreams(client, haproxy_discover_path, 'tcp-services')
+    # verify upstreams, remove invalid upstreams
+    find_existing_services(client, haproxy_discover_path, registrator_path, 'tcp-services')
 
   end # end tcp-services
 end # End of run_app
